@@ -9,7 +9,15 @@ from streamlit_autorefresh import st_autorefresh
 
 load_dotenv(Path.home() / ".env")
 ELEVEN_KEY = os.getenv("ELEVENLABS_API_KEY")
-VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # Adam
+VOICES = {
+    "Adam (deep, sportscaster)": "pNInz6obpgDQGcFmaJgB",
+    "Brian (warm baritone)": "nPczCjzI2devNBz1zQrb",
+    "Bill (older narrator)": "pqHfZKP75CvOlQylNhV4",
+    "Antoni (energetic)": "ErXwobaYiN019PkySvjV",
+    "George (calm)": "JBFqnCBsd6RMkjVDRZzb",
+    "Rachel (female, news)": "21m00Tcm4TlvDq8ikWAM",
+    "Charlie (Aussie)": "IKne3meq5aSn9XLyUdCD",
+}
 
 LOGO_URL = "https://cdn.nba.com/logos/nba/{tid}/global/L/logo.svg"
 HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/260x190/{pid}.png"
@@ -24,9 +32,15 @@ st.session_state.setdefault("auto_announce", True)
 st.session_state.setdefault("knicks_only_audio", False)
 st.session_state.setdefault("audio_queue", [])
 
-c1, c2 = st.columns(2)
-st.session_state.auto_announce = c1.toggle("🔊 Auto-announce live plays", value=st.session_state.auto_announce)
-st.session_state.knicks_only_audio = c2.toggle("⭐ Knicks-only audio", value=st.session_state.knicks_only_audio)
+c1, c2, c3 = st.columns([1, 1, 2])
+st.session_state.auto_announce = c1.toggle("🔊 Auto-announce", value=st.session_state.auto_announce)
+st.session_state.knicks_only_audio = c2.toggle("⭐ Knicks-only", value=st.session_state.knicks_only_audio)
+voice_name = c3.selectbox("Announcer voice", list(VOICES.keys()), index=0)
+VOICE_ID = VOICES[voice_name]
+
+tcol1, tcol2 = st.columns([1, 5])
+if tcol1.button("🎤 Test voice"):
+    st.session_state.audio_queue.append(("test", "Welcome back to the NBA Live Tracker. The Knicks are taking the floor."))
 
 games = scoreboard.ScoreBoard().get_dict()['scoreboard']['games']
 if not games:
@@ -52,9 +66,33 @@ def expand(text: str) -> str:
         text = re.sub(rf"\b{re.escape(short)}\b", long, text, flags=re.IGNORECASE)
     return text
 
+def browser_tts(text: str):
+    """Fallback: use the user's browser SpeechSynthesis (free, no key)."""
+    import json as _json
+    import streamlit.components.v1 as components
+    safe = _json.dumps(text)
+    components.html(
+        f"""
+        <script>
+          const u = new SpeechSynthesisUtterance({safe});
+          u.rate = 1.0; u.pitch = 1.0;
+          const pick = () => {{
+            const v = speechSynthesis.getVoices();
+            const m = v.find(x => /male|daniel|alex|fred/i.test(x.name)) || v[0];
+            if (m) u.voice = m;
+            speechSynthesis.speak(u);
+          }};
+          if (speechSynthesis.getVoices().length) pick();
+          else speechSynthesis.onvoiceschanged = pick;
+        </script>
+        """,
+        height=0,
+    )
+
 def tts(text: str) -> bytes | None:
     text = expand(text)
     if not ELEVEN_KEY:
+        browser_tts(text)
         return None
     r = requests.post(
         f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}",
@@ -168,7 +206,7 @@ def render_game(game):
 
 
 if not ELEVEN_KEY:
-    st.warning("ELEVENLABS_API_KEY not set — voice announcer disabled.")
+    st.info("No ELEVENLABS_API_KEY set — falling back to your browser's built-in voice.")
 
 for g in ordered:
     render_game(g)
